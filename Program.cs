@@ -1,0 +1,116 @@
+using System.ClientModel;
+using System.Text.Json;
+using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
+using Microsoft.Agents.AI.Workflows;
+using OpenAI;
+using Models;
+
+var serviceUrl = Environment.GetEnvironmentVariable("FOUNDRY_SERVICE_URL") 
+    ?? throw new InvalidOperationException("Environment variable 'FOUNDRY_SERVICE_URL' is missing.");
+
+var apiKey = Environment.GetEnvironmentVariable("AZURE_OPENAI_TOKEN") 
+    ?? throw new InvalidOperationException("Environment variable 'AZURE_OPENAI_TOKEN' is missing.");
+var model = "gpt-5-mini";
+
+OpenAIClient client = new(
+    new ApiKeyCredential(apiKey),
+    new OpenAIClientOptions
+    {
+        Endpoint = new Uri(serviceUrl)
+    }
+);
+
+IChatClient chatClient = client.GetChatClient(model).AsIChatClient();
+
+#region bi agent
+string filePathBIAgentInstructions = "agent_prompts/BIGatekeeperInstructions.txt";
+string biAgentPrompt = File.ReadAllText(filePathBIAgentInstructions);
+
+var biAgent = new ChatClientAgent(
+    chatClient,
+    instructions: biAgentPrompt,
+    name: "BIAgent"
+);
+var biAgentExecutor = new BiGatekeeperExecutor(biAgent);
+#endregion 
+
+#region SQL agent
+string filePath = "agent_prompts/SQLAgentInstructions.txt";
+string instructions = File.ReadAllText(filePath);
+
+DatabaseToolsService databaseTools = new();
+
+var sqlAgent = new ChatClientAgent(
+    chatClient,
+    name: "SQLAgent",
+    instructions: instructions,
+    tools: [
+        AIFunctionFactory.Create(databaseTools.GetDatabaseSchema),
+        AIFunctionFactory.Create(databaseTools.GetTableSchema),
+        AIFunctionFactory.Create(databaseTools.ExecuteQuery),
+    ]);
+
+var sqlAgentExecutor = new SQLAgentExecutor(sqlAgent);
+#endregion
+
+#region visualisation agent
+string filePathVizAgentInstructions = "agent_prompts/VizAgentInstructions.txt";
+string vizAgentPrompt = File.ReadAllText(filePathVizAgentInstructions);
+
+var vizAgent = new ChatClientAgent(
+    chatClient,
+    new ChatClientAgentOptions
+    {
+        ChatOptions = new()
+        {
+            Instructions = vizAgentPrompt       
+        }
+    }
+);
+
+var vizAgentExecutor = new VizAgentExecutor(vizAgent);
+#endregion
+
+var persistJSONExecutor = new PersistJSONExecutor<VegaLiteSpec>("file.json");
+
+Console.WriteLine("BI Chatbot Gatekeeper");
+
+Console.WriteLine("Enter a BI question for the Chinook database.");
+Console.WriteLine();
+
+Console.Write("> ");
+// string? userPrompt = Console.ReadLine();
+string userPrompt = "Top 5 customers by total invoice revenue";
+Console.WriteLine(userPrompt);
+
+try
+{
+    var workflow = new WorkflowBuilder(biAgentExecutor)
+        .AddEdge(biAgentExecutor, sqlAgentExecutor)
+        .AddEdge(sqlAgentExecutor, vizAgentExecutor)
+        .AddEdge(vizAgentExecutor, persistJSONExecutor)
+        .Build();
+
+    StreamingRun run = await InProcessExecution.RunStreamingAsync(workflow, userPrompt);
+    await run.TrySendMessageAsync(new TurnToken(emitEvents: true));
+
+    await foreach (WorkflowEvent evt in run.WatchStreamAsync().ConfigureAwait(false))
+    {
+        // if (evt is WorkflowOutputEvent outputEvent)
+        // {
+        //     Console.WriteLine($"{outputEvent}");
+        // }
+        if (evt is ExecutorCompletedEvent executorOutputEvent)
+        {
+            Console.WriteLine(executorOutputEvent.Data);
+        }
+    }
+}
+catch (Exception ex)
+{
+    Console.ForegroundColor = ConsoleColor.Red;
+    Console.WriteLine("BI gatekeeper failed.");
+    Console.WriteLine(ex.Message);
+    Console.ResetColor();
+}
