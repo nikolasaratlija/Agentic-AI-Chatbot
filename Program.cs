@@ -5,7 +5,9 @@ using Microsoft.Extensions.AI;
 using Microsoft.Agents.AI.Workflows;
 using OpenAI;
 using Models;
+using System.ComponentModel;
 
+#region init
 var serviceUrl = Environment.GetEnvironmentVariable("FOUNDRY_SERVICE_URL") 
     ?? throw new InvalidOperationException("Environment variable 'FOUNDRY_SERVICE_URL' is missing.");
 
@@ -22,36 +24,6 @@ OpenAIClient client = new(
 );
 
 IChatClient chatClient = client.GetChatClient(model).AsIChatClient();
-
-#region bi agent
-string filePathBIAgentInstructions = "agent_prompts/BIGatekeeperInstructions.txt";
-string biAgentPrompt = File.ReadAllText(filePathBIAgentInstructions);
-
-var biAgent = new ChatClientAgent(
-    chatClient,
-    instructions: biAgentPrompt,
-    name: "BIAgent"
-);
-var biAgentExecutor = new BiGatekeeperExecutor(biAgent);
-#endregion 
-
-#region SQL agent
-string filePath = "agent_prompts/SQLAgentInstructions.txt";
-string instructions = File.ReadAllText(filePath);
-
-DatabaseToolsService databaseTools = new();
-
-var sqlAgent = new ChatClientAgent(
-    chatClient,
-    name: "SQLAgent",
-    instructions: instructions,
-    tools: [
-        AIFunctionFactory.Create(databaseTools.GetDatabaseSchema),
-        AIFunctionFactory.Create(databaseTools.GetTableSchema),
-        AIFunctionFactory.Create(databaseTools.ExecuteQuery),
-    ]);
-
-var sqlAgentExecutor = new SQLAgentExecutor(sqlAgent);
 #endregion
 
 #region visualisation agent
@@ -68,49 +40,59 @@ var vizAgent = new ChatClientAgent(
         }
     }
 );
-
-var vizAgentExecutor = new VizAgentExecutor(vizAgent);
 #endregion
 
-var persistJSONExecutor = new PersistJSONExecutor<VegaLiteSpec>("file.json");
+#region EHR agent
+string EHRAgentPrompt = File.ReadAllText("agent_prompts/EHRAgentInstructions.txt");
 
-Console.WriteLine("BI Chatbot Gatekeeper");
+DatabaseToolsService databaseTools = new("data/ehr.db");
+DataVizTool dataVizTool = new(vizAgent);
 
-Console.WriteLine("Enter a BI question for the Chinook database.");
-Console.WriteLine();
+var ehrAgent = new ChatClientAgent(
+    chatClient,
+    instructions: EHRAgentPrompt,
+    name: "EHR Agent",
+    tools: [
+        AIFunctionFactory.Create(databaseTools.GetDatabaseSchema),
+        AIFunctionFactory.Create(databaseTools.GetTableSchema),
+        AIFunctionFactory.Create(databaseTools.ExecuteQuery),
+    ]);
+#endregion
 
-Console.Write("> ");
-// string? userPrompt = Console.ReadLine();
-string userPrompt = "Top 5 customers by total invoice revenue";
-Console.WriteLine(userPrompt);
+#region orchestrator agent
+// var vizAgentExecutor = new VizAgentExecutor(vizAgent);
+// var persistJSONExecutor = new PersistJSONExecutor<VegaLiteSpec>("file.json");
 
-try
+// var visualizationWorkflow = new WorkflowBuilder(vizAgentExecutor)
+//     .AddEdge(vizAgentExecutor, persistJSONExecutor)
+//     .Build();
+
+string orchAgentPrompt = File.ReadAllText("agent_prompts/OrchestratorInstructions.txt");
+
+var orchestratorAgent = new ChatClientAgent(
+    chatClient,
+    name: "Orchestrator Agent",
+    instructions: orchAgentPrompt,
+    tools: [
+        ehrAgent.AsAIFunction(),
+        AIFunctionFactory.Create(dataVizTool.GenerateVisualisation)
+        // visualizationWorkflow.AsAIAgent().AsAIFunction(new AIFunctionFactoryOptions{Description = "Converts natural-language visualization requests into a valid Vega-Lite specification. Use this tool when a user wants to create a data visualization from a textual description. The generated Vega-Lite JSON is persisted to disk."}),
+    ]);
+#endregion
+
+AgentSession session = await orchestratorAgent.CreateSessionAsync();
+
+Console.WriteLine("EHR AI Chatbot");
+
+// Create a bar chart of the amount of male and female patients.
+for (int turn = 0; turn <= 5; turn++)
 {
-    var workflow = new WorkflowBuilder(biAgentExecutor)
-        .AddEdge(biAgentExecutor, sqlAgentExecutor)
-        .AddEdge(sqlAgentExecutor, vizAgentExecutor)
-        .AddEdge(vizAgentExecutor, persistJSONExecutor)
-        .Build();
-
-    StreamingRun run = await InProcessExecution.RunStreamingAsync(workflow, userPrompt);
-    await run.TrySendMessageAsync(new TurnToken(emitEvents: true));
-
-    await foreach (WorkflowEvent evt in run.WatchStreamAsync().ConfigureAwait(false))
+    Console.Write("\n> ");
+    string? userPrompt = Console.ReadLine();
+    
+    await foreach (var update in orchestratorAgent.RunStreamingAsync(userPrompt, session))
     {
-        // if (evt is WorkflowOutputEvent outputEvent)
-        // {
-        //     Console.WriteLine($"{outputEvent}");
-        // }
-        if (evt is ExecutorCompletedEvent executorOutputEvent)
-        {
-            Console.WriteLine(executorOutputEvent.Data);
-        }
+        Console.Write(update);
     }
 }
-catch (Exception ex)
-{
-    Console.ForegroundColor = ConsoleColor.Red;
-    Console.WriteLine("BI gatekeeper failed.");
-    Console.WriteLine(ex.Message);
-    Console.ResetColor();
-}
+
