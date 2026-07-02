@@ -11,7 +11,7 @@ public class VegaLiteSpec
     public DataSpec Data { get; set; }
 
     [JsonPropertyName("mark")]
-    public object Mark { get; set; }  // string or MarkDef
+    public string Mark { get; set; }
 
     [JsonPropertyName("encoding")]
     public EncodingSpec Encoding { get; set; }
@@ -32,7 +32,7 @@ public class DataSpec
     public object Values { get; set; }
 
     [JsonPropertyName("url")]
-    public string Url { get; set; }
+    public string? Url { get; set; }
 }
 
 public class EncodingSpec
