@@ -22,7 +22,7 @@ public class MyAgentEvaluations
         var testCase = new TestCase
         {
             Name = "Evaluation",
-            Input = "What can and can't you do",
+            Input = "In just a couple words describe what you can and can't do.",
             ExpectedOutputContains = "EHR"
         };
 
