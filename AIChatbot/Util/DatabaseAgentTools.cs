@@ -1,5 +1,7 @@
 using System.ComponentModel;
 
+namespace AIChatbot.Util;
+
 public class DatabaseAgentTools
 {
     private readonly DatabaseToolsService _dbService;
