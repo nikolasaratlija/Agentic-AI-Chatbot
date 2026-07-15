@@ -52,14 +52,22 @@ DatabaseToolsService databaseTools = new("data/ehr.db");
 
 var ehrAgent = new ChatClientAgent(
     chatClient,
-    // loggerFactory: loggerFactory,
-    instructions: EHRAgentPrompt,
-    name: "EHR Agent",
-    tools: [
-        // AIFunctionFactory.Create(databaseTools.GetDatabaseSchema),
-        // AIFunctionFactory.Create(databaseTools.GetTableSchema),
-        AIFunctionFactory.Create(databaseTools.ExecuteQuery),
-    ]).AsBuilder().UseOpenTelemetry("chatbot-prototype-ehr").Build();
+    new ChatClientAgentOptions
+    {
+        Name = "EHR Agent",
+        ChatOptions = new()
+        {
+            Instructions = EHRAgentPrompt,
+            Tools = [
+                // AIFunctionFactory.Create(databaseTools.GetDatabaseSchema),
+                // AIFunctionFactory.Create(databaseTools.GetTableSchema),
+                AIFunctionFactory.Create(databaseTools.ExecuteQuery)
+            ],
+            Reasoning = new ReasoningOptions() { Effort = ReasoningEffort.None }
+        }
+    },
+    loggerFactory
+).AsBuilder().UseOpenTelemetry("chatbot-prototype-ehr").Build();
 #endregion
 
 #region orchestrator agent
@@ -68,7 +76,7 @@ string orchAgentPrompt = File.ReadAllText("agent_prompts/OrchestratorInstruction
 
 var orchestratorAgent = new ChatClientAgent(
     chatClient,
-    // loggerFactory: loggerFactory,
+    loggerFactory: loggerFactory,
     instructions: orchAgentPrompt,
     name: "Orchestrator Agent",
     tools: [
@@ -77,16 +85,18 @@ var orchestratorAgent = new ChatClientAgent(
     ]).AsBuilder().UseOpenTelemetry("chatbot-prototype-orchestrator").Build();
 #endregion
 
-// var resourceBuilder = ResourceBuilder
-//     .CreateDefault()
-//     .AddService("myapplication");
+#region aspire
+var resourceBuilder = ResourceBuilder
+    .CreateDefault()
+    .AddService("myapplication");
 
-// using var tracerProvider = Sdk.CreateTracerProviderBuilder()
-//     .SetResourceBuilder(resourceBuilder)
-//     .AddSource("chatbot-prototype-orchestrator")
-//     .AddSource("chatbot-prototype-ehr")
-//     .AddOtlpExporter(options => options.Endpoint = new Uri("http://localhost:4317"))
-//     .Build();
+using var tracerProvider = Sdk.CreateTracerProviderBuilder()
+    .SetResourceBuilder(resourceBuilder)
+    .AddSource("chatbot-prototype-orchestrator")
+    .AddSource("chatbot-prototype-ehr")
+    .AddOtlpExporter(options => options.Endpoint = new Uri("http://localhost:4317"))
+    .Build();
+#endregion
 
 // var response = await orchestratorAgent.RunAsync("what is the distribution of sex between patients");
 // Console.WriteLine(response.Messages);
