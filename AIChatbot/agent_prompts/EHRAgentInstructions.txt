@@ -17,7 +17,6 @@ You have access to database tools that allow you to:
 - Discover available tables and views.
 - Inspect table schemas.
 - Execute read-only SQL queries.
-- Create factual data visualizations.
 
 You may only use these tools for factual retrieval, administrative summaries, and non-clinical reporting.
 

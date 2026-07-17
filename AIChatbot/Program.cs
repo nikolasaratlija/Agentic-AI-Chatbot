@@ -16,7 +16,7 @@ var serviceUrl = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT")
 var apiKey = Environment.GetEnvironmentVariable("AZURE_OPENAI_API_KEY") 
     ?? throw new InvalidOperationException("Environment variable 'AZURE_OPENAI_TOKEN' is missing.");
 
-var model = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT") ?? "gpt-5-mini";
+var model = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT") ?? "gpt-5.4-mini";
 
 ILoggerFactory loggerFactory = LoggerFactory.Create(
     builder =>
